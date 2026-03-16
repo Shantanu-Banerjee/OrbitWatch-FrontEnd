@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OrbitWatch — Space Debris Dashboard</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- ===== NAVBAR ===== -->
+  <nav class="navbar">
+    <div class="nav-logo">
+      <span class="logo-icon">🛰️</span>
+      <span class="logo-text">OrbitWatch</span>
+    </div>
+    <div class="nav-subtitle">Space Debris Monitoring Dashboard</div>
+    <div class="nav-right">
+      <div class="nav-clock" id="utcTime">UTC --:--:--</div>
+      <div class="nav-status" id="dataStatus">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">CONNECTING...</span>
+      </div>
+      <!-- Dark/Light mode toggle -->
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+        <span id="themeIcon">☀️</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ===== CLOSE APPROACH ALERT BANNER ===== -->
+  <div id="alertBanner" class="alert-banner" style="display:none;">
+    <span class="alert-icon">⚠️</span>
+    <span id="alertText">Close approach detected!</span>
+    <button onclick="document.getElementById('alertBanner').style.display='none'" class="alert-close">✕</button>
+  </div>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <main class="container">
+
+    <!-- INTRO -->
+    <section class="intro-section">
+      <h1 class="intro-title">Earth's Orbital Crisis</h1>
+      <p class="intro-text">
+        Over <strong>27,000 tracked debris objects</strong> are currently orbiting Earth at speeds
+        up to 28,000 km/h. Each one is a potential threat to active satellites, the ISS,
+        and future space missions. This dashboard uses real-time TLE data to track every object's
+        live position, updated every second.
+      </p>
+    </section>
+
+    <!-- STATS CARDS -->
+    <section class="stats-section">
+      <div class="stat-card">
+        <div class="stat-icon">🗑️</div>
+        <div class="stat-number" id="total-count" data-target="0">0</div>
+        <div class="stat-label">Total Debris Tracked</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-icon">⚠️</div>
+        <div class="stat-number" id="high-risk-count" data-target="0">0</div>
+        <div class="stat-label">High Risk Objects</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🌍</div>
+        <div class="stat-number" id="altitude-count" data-target="0">0</div>
+        <div class="stat-label">Objects in LEO (&lt;2000km)</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="stat-icon">💥</div>
+        <div class="stat-number" id="close-approach-count" data-target="0">0</div>
+        <div class="stat-label">Close Approach Pairs</div>
+      </div>
+    </section>
+
+    <!-- 3D GLOBE -->
+    <section class="globe-section">
+      <h2 class="section-title">Live Orbital Debris Map</h2>
+      <p class="section-subtitle">
+        Positions propagated from live TLE data · Updated every second ·
+        <span style="color:#ff3d3d">●</span> High Risk &nbsp;|&nbsp;
+        <span style="color:#ffd700">●</span> Medium &nbsp;|&nbsp;
+        <span style="color:#00ff88">●</span> Low Risk
+      </p>
+      <div class="globe-wrapper">
+        <div id="cesiumContainer"></div>
+        <!-- Globe Controls Overlay -->
+        <div class="globe-controls">
+          <button class="globe-btn" id="btnRotate" title="Toggle Rotation" onclick="toggleGlobeRotation()">🔄 Auto-Rotate</button>
+          <button class="globe-btn" id="btnReset" title="Reset View" onclick="resetGlobeView()">🏠 Reset View</button>
+          <button class="globe-btn" id="btnISS" title="Focus ISS" onclick="focusISS()">🚀 Focus ISS</button>
+          <button class="globe-btn" id="btnPaths" title="Toggle Orbital Paths" onclick="toggleOrbitalPaths()">🛤️ Paths</button>
+          <button class="globe-btn active" id="btnHigh" title="Toggle High Risk" onclick="toggleRiskLayer('high')">🔴 High</button>
+          <button class="globe-btn active" id="btnMed" title="Toggle Medium Risk" onclick="toggleRiskLayer('medium')">🟡 Med</button>
+          <button class="globe-btn active" id="btnLow" title="Toggle Low Risk" onclick="toggleRiskLayer('low')">🟢 Low</button>
+        </div>
+        <!-- Globe Legend -->
+        <div class="globe-legend">
+          <div class="legend-item"><span class="legend-dot high"></span>High Risk (&lt;500km or ecc&gt;0.01)</div>
+          <div class="legend-item"><span class="legend-dot medium"></span>Medium (500–2000km)</div>
+          <div class="legend-item"><span class="legend-dot low"></span>Low Risk (&gt;2000km)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ORBITAL SHELLS -->
+    <section class="shells-section">
+      <h2 class="section-title">Orbital Shells</h2>
+      <div class="shells-bar">
+        <div class="shell-zone leo" title="Low Earth Orbit: 160–2000km">
+          <span class="shell-label">LEO</span>
+          <span class="shell-range">160–2,000 km</span>
+          <span class="shell-count" id="shell-leo-count">—</span>
+          <span class="shell-desc">ISS, Starlink, most debris</span>
+        </div>
+        <div class="shell-zone meo" title="Medium Earth Orbit: 2000–35786km">
+          <span class="shell-label">MEO</span>
+          <span class="shell-range">2,000–35,786 km</span>
+          <span class="shell-count" id="shell-meo-count">—</span>
+          <span class="shell-desc">GPS, Galileo satellites</span>
+        </div>
+        <div class="shell-zone geo" title="Geostationary Orbit: ~35786km">
+          <span class="shell-label">GEO</span>
+          <span class="shell-range">~35,786 km</span>
+          <span class="shell-count" id="shell-geo-count">—</span>
+          <span class="shell-desc">Weather, comms satellites</span>
+        </div>
+        <div class="shell-zone heo" title="High Earth Orbit: >35786km">
+          <span class="shell-label">HEO</span>
+          <span class="shell-range">&gt;35,786 km</span>
+          <span class="shell-count" id="shell-heo-count">—</span>
+          <span class="shell-desc">Deep space, transfer orbits</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- DEBRIS GROWTH CHART -->
+    <section class="chart-section">
+      <h2 class="section-title">Debris Growth Over Time</h2>
+      <p class="section-subtitle">Key events that shaped Earth's debris environment</p>
+      <div class="chart-wrapper">
+        <canvas id="debrisGrowthChart"></canvas>
+      </div>
+    </section>
+
+    <!-- CLOSE APPROACH ALERTS -->
+    <section class="alerts-section" id="alertsSection">
+      <h2 class="section-title">⚠️ Close Approach Monitor</h2>
+      <p class="section-subtitle">Objects detected within proximity threshold — computed from current positions</p>
+      <div id="closeApproachList" class="close-approach-list">
+        <div class="approach-loading">🔍 Scanning for close approaches...</div>
+      </div>
+    </section>
+
+    <!-- SEARCH + FILTER -->
+    <section class="filter-section">
+      <h2 class="section-title">Debris Database</h2>
+      <div class="filter-bar">
+        <input type="text" id="searchInput" class="search-input"
+               placeholder="🔍 Search by object name or NORAD ID..." />
+        <select id="riskFilter" class="filter-select">
+          <option value="all">All Risk Levels</option>
+          <option value="high">High Risk</option>
+          <option value="medium">Medium Risk</option>
+          <option value="low">Low Risk</option>
+        </select>
+        <!-- Altitude Range Slider -->
+        <div class="altitude-filter">
+          <label class="altitude-label">
+            Altitude: <span id="altMin">0</span>–<span id="altMax">60000</span> km
+          </label>
+          <div class="range-slider-container">
+            <input type="range" id="altSliderMin" class="range-slider" min="0" max="60000" value="0" step="100" />
+            <input type="range" id="altSliderMax" class="range-slider" min="0" max="60000" value="60000" step="100" />
+          </div>
+        </div>
+        <button class="export-btn" id="exportBtn" onclick="exportCSV()">📥 Export CSV</button>
+      </div>
+      <!-- Result count -->
+      <div class="result-count" id="resultCount"></div>
+    </section>
+
+    <!-- TABLE -->
+    <section class="table-section">
+      <table class="debris-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-col="name" onclick="sortTable('name')">Object Name <span class="sort-arrow" id="sort-name">↕</span></th>
+            <th class="sortable" data-col="noradId" onclick="sortTable('noradId')">NORAD ID <span class="sort-arrow" id="sort-noradId">↕</span></th>
+            <th class="sortable" data-col="altitude" onclick="sortTable('altitude')">Altitude (km) <span class="sort-arrow" id="sort-altitude">↕</span></th>
+            <th class="sortable" data-col="inclination" onclick="sortTable('inclination')">Inclination (°) <span class="sort-arrow" id="sort-inclination">↕</span></th>
+            <th class="sortable" data-col="riskLevel" onclick="sortTable('riskLevel')">Risk Level <span class="sort-arrow" id="sort-riskLevel">↕</span></th>
+          </tr>
+        </thead>
+        <tbody id="debrisTableBody"></tbody>
+      </table>
+
+      <!-- Pagination -->
+      <div class="pagination" id="paginationBar"></div>
+
+      <!-- Empty state -->
+      <div id="emptyState" class="empty-state" style="display:none;">
+        <div class="empty-icon">🔭</div>
+        <div class="empty-title">No objects found</div>
+        <div class="empty-subtitle">Try adjusting your search or filter criteria</div>
+      </div>
+
+      <div id="loadingMessage" class="loading-message">
+        <div class="loading-bar-wrapper">
+          <div class="loading-bar" id="loadingBar"></div>
+        </div>
+        ⏳ Fetching live TLE data and propagating positions...
+      </div>
+      <div id="errorMessage" class="error-message" style="display:none;">
+        ❌ Could not load live data. Showing sample data instead.
+      </div>
+    </section>
+
+    <!-- WHY IT MATTERS -->
+    <section class="info-section">
+      <h2 class="section-title">Why This Matters</h2>
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="info-icon">💥</div>
+          <h3>Kessler Syndrome</h3>
+          <p>A chain reaction where debris collisions create more debris, potentially making low Earth orbit unusable for generations.</p>
+        </div>
+        <div class="info-card">
+          <div class="info-icon">📡</div>
+          <h3>Satellite Threats</h3>
+          <p>Even a 1cm piece of debris traveling at 28,000 km/h can destroy a functioning satellite worth hundreds of millions of dollars.</p>
+        </div>
+        <div class="info-card">
+          <div class="info-icon">🚀</div>
+          <h3>Future Missions at Risk</h3>
+          <p>Growing debris clouds threaten future Moon missions, Mars missions, and the daily communications we rely on.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <p>OrbitWatch | Data sourced from <a href="https://celestrak.org" target="_blank">CelesTrak</a> | Built for Space Hackathon 2026</p>
+  </footer>
+
+  <!-- SCRIPTS -->
+  <script src="https://unpkg.com/satellite.js/dist/satellite.min.js"></script>
+  <script src="data.js"></script>
+  <script src="globe.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
